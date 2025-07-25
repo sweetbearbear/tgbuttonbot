@@ -2,6 +2,8 @@ import os
 import logging
 from dotenv import load_dotenv
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram.constants import ParseMode
+from telegram.helpers import escape_markdown
 from telegram.ext import (
     ApplicationBuilder,
     ContextTypes,
@@ -41,14 +43,21 @@ async def forward_to_channel(update: Update, context: ContextTypes.DEFAULT_TYPE)
     raw = msg.caption or msg.text or ""
     content, markup = parse_buttons(raw)
 
-    # 根据消息类型转发，并用 Markdown 渲染
+    # 动态选择解析模式：优先 HTML，否则用 MarkdownV2 并自动转义
+    if '<a ' in raw or '<b>' in raw or '<i>' in raw or '<u>' in raw:
+        parse_mode = ParseMode.HTML
+    else:
+        parse_mode = ParseMode.MARKDOWN_V2
+        content = escape_markdown(content, version=2)
+
+    # 按消息类型转发
     if msg.photo:
         await context.bot.send_photo(
             chat_id=CHANNEL_ID,
             photo=msg.photo[-1].file_id,
             caption=content,
             reply_markup=markup,
-            parse_mode="Markdown",
+            parse_mode=parse_mode,
         )
     elif msg.video:
         await context.bot.send_video(
@@ -56,7 +65,7 @@ async def forward_to_channel(update: Update, context: ContextTypes.DEFAULT_TYPE)
             video=msg.video.file_id,
             caption=content,
             reply_markup=markup,
-            parse_mode="Markdown",
+            parse_mode=parse_mode,
         )
     elif msg.document:
         await context.bot.send_document(
@@ -64,14 +73,14 @@ async def forward_to_channel(update: Update, context: ContextTypes.DEFAULT_TYPE)
             document=msg.document.file_id,
             caption=content,
             reply_markup=markup,
-            parse_mode="Markdown",
+            parse_mode=parse_mode,
         )
     else:
         await context.bot.send_message(
             chat_id=CHANNEL_ID,
             text=content,
             reply_markup=markup,
-            parse_mode="Markdown",
+            parse_mode=parse_mode,
         )
 
     logging.info("已转发内容到频道：%s", CHANNEL_ID)
@@ -80,8 +89,9 @@ async def forward_to_channel(update: Update, context: ContextTypes.DEFAULT_TYPE)
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await context.bot.send_message(
         chat_id=update.effective_chat.id,
-        text="Bot 已启动！私聊我发送文字/图片/视频，并在正文后加 `---按钮---` 配置按钮吧。",
-        parse_mode="Markdown",
+        text=("Bot 已启动！私聊我发送文字/图片/视频，支持 MarkdownV2 或 HTML 标签，" 
+              "并在正文后加 `---按钮---` 配置按钮。"),
+        parse_mode=ParseMode.MARKDOWN_V2,
     )
 
 
