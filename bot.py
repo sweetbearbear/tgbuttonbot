@@ -1,97 +1,104 @@
 import os
 import logging
 from dotenv import load_dotenv
-from telegram import (
-    Bot,
-    Update,
-    InlineKeyboardButton,
-    InlineKeyboardMarkup
-)
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
-    Updater,
+    ApplicationBuilder,
+    ContextTypes,
     MessageHandler,
-    Filters,
-    CallbackContext
+    CommandHandler,
+    filters,
 )
 
-# 加载本地 .env 文件中的环境变量
+# —— 加载配置 ——
 load_dotenv()
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 CHANNEL_ID = os.getenv("TELEGRAM_CHANNEL_ID")
 
 logging.basicConfig(
-    format='[%(asctime)s] %(levelname)s: %(message)s',
-    level=logging.INFO
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    level=logging.INFO,
 )
 
+
 def parse_buttons(text: str):
-    """从消息中解析正文和按钮"""
+    """解析正文和按钮配置"""
     if '---按钮---' not in text:
         return text.strip(), None
-    content, button_part = text.split('---按钮---', 1)
-    lines = button_part.strip().splitlines()
-    buttons = []
-    for line in lines:
-        parts = [p.strip() for p in line.split('|')]
-        if len(parts) == 2:
-            buttons.append([InlineKeyboardButton(parts[0], url=parts[1])])
-    return content.strip(), InlineKeyboardMarkup(buttons) if buttons else None
+    content, btn_section = text.split('---按钮---', 1)
+    rows = []
+    for line in btn_section.strip().splitlines():
+        if '|' in line:
+            name, url = [p.strip() for p in line.split('|', 1)]
+            rows.append([InlineKeyboardButton(name, url=url)])
+    return content.strip(), InlineKeyboardMarkup(rows) if rows else None
 
-def forward_to_channel(update: Update, context: CallbackContext):
-    message = update.message
-    text = message.caption or message.text or ""
-    content, reply_markup = parse_buttons(text)
 
-    if message.photo:
-        context.bot.send_photo(
+async def forward_to_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    msg = update.message
+    raw = msg.caption or msg.text or ""
+    content, markup = parse_buttons(raw)
+
+    if msg.photo:
+        await context.bot.send_photo(
             chat_id=CHANNEL_ID,
-            photo=message.photo[-1].file_id,
+            photo=msg.photo[-1].file_id,
             caption=content,
-            reply_markup=reply_markup,
-            parse_mode='HTML'
+            reply_markup=markup,
+            parse_mode="HTML",
         )
-    elif message.video:
-        context.bot.send_video(
+    elif msg.video:
+        await context.bot.send_video(
             chat_id=CHANNEL_ID,
-            video=message.video.file_id,
+            video=msg.video.file_id,
             caption=content,
-            reply_markup=reply_markup,
-            parse_mode='HTML'
+            reply_markup=markup,
+            parse_mode="HTML",
         )
-    elif message.document:
-        context.bot.send_document(
+    elif msg.document:
+        await context.bot.send_document(
             chat_id=CHANNEL_ID,
-            document=message.document.file_id,
+            document=msg.document.file_id,
             caption=content,
-            reply_markup=reply_markup,
-            parse_mode='HTML'
+            reply_markup=markup,
+            parse_mode="HTML",
         )
     else:
-        context.bot.send_message(
+        await context.bot.send_message(
             chat_id=CHANNEL_ID,
             text=content,
-            reply_markup=reply_markup,
-            parse_mode='HTML'
+            reply_markup=markup,
+            parse_mode="HTML",
         )
 
-    logging.info(f"消息已发送到频道：{CHANNEL_ID}")
+    logging.info("已转发内容到频道")
 
-def main():
-    if not TOKEN or not CHANNEL_ID:
-        logging.error("请在 .env 文件中设置 TELEGRAM_BOT_TOKEN 和 TELEGRAM_CHANNEL_ID")
-        return
 
-    updater = Updater(TOKEN, use_context=True)
-    dp = updater.dispatcher
+async def start(_: Update, context: ContextTypes.DEFAULT_TYPE):
+    await context.bot.send_message(
+        chat_id=_.effective_chat.id,
+        text="Bot 已启动！发送文字/图片/视频并在正文后加 `---按钮---` 配置按钮吧。",
+        parse_mode="Markdown",
+    )
 
-    dp.add_handler(MessageHandler(
-        Filters.text | Filters.photo | Filters.video | Filters.document,
-        forward_to_channel
-    ))
 
-    logging.info("Bot 已启动，监听中...")
-    updater.start_polling()
-    updater.idle()
-
-if __name__ == '__main__':
-    main()
+if __name__ == "__main__":
+    app = (
+        ApplicationBuilder()
+        .token(TOKEN)
+        .build()
+    )
+    # `/start` 测试指令
+    app.add_handler(CommandHandler("start", start))
+    # 任意消息转发
+    app.add_handler(
+        MessageHandler(
+            filters.TEXT
+            | filters.PHOTO
+            | filters.VIDEO
+            | filters.Document.ALL,
+            forward_to_channel,
+        )
+    )
+    logging.info("Bot 正在运行…")
+    app.run_polling()
