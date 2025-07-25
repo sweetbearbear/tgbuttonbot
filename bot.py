@@ -3,14 +3,7 @@ import logging
 from dotenv import load_dotenv
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.constants import ParseMode
-from telegram.helpers import escape_markdown
-from telegram.ext import (
-    ApplicationBuilder,
-    ContextTypes,
-    MessageHandler,
-    CommandHandler,
-    filters,
-)
+from telegram.ext import ApplicationBuilder, ContextTypes, MessageHandler, CommandHandler, filters
 
 # —— 加载本地 .env 配置 ——
 load_dotenv()
@@ -23,7 +16,6 @@ logging.basicConfig(
     level=logging.INFO,
 )
 
-
 def parse_buttons(text: str):
     """从消息中解析正文和按钮配置，并返回 (content, InlineKeyboardMarkup)"""
     if '---按钮---' not in text:
@@ -34,23 +26,17 @@ def parse_buttons(text: str):
         if '|' in line:
             name, url = [p.strip() for p in line.split('|', 1)]
             rows.append([InlineKeyboardButton(name, url=url)])
-    markup = InlineKeyboardMarkup(rows) if rows else None
-    return content.strip(), markup
-
+    return content.strip(), InlineKeyboardMarkup(rows) if rows else None
 
 async def forward_to_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.message
     raw = msg.caption or msg.text or ""
     content, markup = parse_buttons(raw)
 
-    # 动态选择解析模式：优先 HTML，否则用 MarkdownV2 并自动转义
-    if '<a ' in raw or '<b>' in raw or '<i>' in raw or '<u>' in raw:
-        parse_mode = ParseMode.HTML
-    else:
-        parse_mode = ParseMode.MARKDOWN_V2
-        content = escape_markdown(content, version=2)
+    # 固定使用 Markdown 解析模式
+    parse_mode = ParseMode.MARKDOWN
 
-    # 按消息类型转发
+    # 根据消息类型转发
     if msg.photo:
         await context.bot.send_photo(
             chat_id=CHANNEL_ID,
@@ -82,39 +68,26 @@ async def forward_to_channel(update: Update, context: ContextTypes.DEFAULT_TYPE)
             reply_markup=markup,
             parse_mode=parse_mode,
         )
-
     logging.info("已转发内容到频道：%s", CHANNEL_ID)
-
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await context.bot.send_message(
         chat_id=update.effective_chat.id,
-        text=("Bot 已启动！私聊我发送文字/图片/视频，支持 MarkdownV2 或 HTML 标签，" 
-              "并在正文后加 `---按钮---` 配置按钮。"),
-        parse_mode=ParseMode.MARKDOWN_V2,
+        text="Bot 已启动！私聊我发送文字/图片/视频，并在正文后加 `---按钮---` 配置按钮。",
+        parse_mode=ParseMode.MARKDOWN,
     )
-
 
 if __name__ == "__main__":
     if not TOKEN or not CHANNEL_ID:
         logging.error("请在 .env 中设置 TELEGRAM_BOT_TOKEN 和 TELEGRAM_CHANNEL_ID")
         exit(1)
 
-    # 构建应用
+    # 构建并运行应用
     app = ApplicationBuilder().token(TOKEN).build()
-
-    # 测试命令
     app.add_handler(CommandHandler("start", start))
-    # 消息处理
-    app.add_handler(
-        MessageHandler(
-            filters.TEXT
-            | filters.PHOTO
-            | filters.VIDEO
-            | filters.Document.ALL,
-            forward_to_channel,
-        )
-    )
-
+    app.add_handler(MessageHandler(
+        filters.TEXT | filters.PHOTO | filters.VIDEO | filters.Document.ALL,
+        forward_to_channel
+    ))
     logging.info("Bot 正在运行…")
     app.run_polling()
